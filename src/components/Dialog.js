@@ -2,20 +2,18 @@
 
 import React, { Component } from 'react';
 import {
-  View,
-  StyleSheet,
   Animated,
   Dimensions,
   BackAndroid as RNBackAndroid,
   BackHandler as RNBackHandler,
+  StyleSheet,
+  View,
 } from 'react-native';
 
-import Overlay from './Overlay';
-import DialogActionList from './DialogActionList';
-import type { DialogProps } from '../type';
+import Animation from '../animations/Animation';
 import FadeAnimation from '../animations/FadeAnimation';
-import ScaleAnimation from '../animations/ScaleAnimation';
-import SlideAnimation from '../animations/SlideAnimation';
+import type { DialogProps } from '../type';
+import Overlay from './Overlay';
 
 const BackHandler = RNBackHandler || RNBackAndroid;
 
@@ -37,6 +35,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 1000,
+    elevation: 10,
   },
   dialog: {
     overflow: 'hidden',
@@ -60,8 +59,8 @@ type DialogState =
  | typeof DIALOG_CLOSED
 
 type State = {
-  dialogAnimation: FadeAnimation | ScaleAnimation | SlideAnimation;
-  dialogState: DialogState
+  dialogAnimation: Animation;
+  dialogState: DialogState;
 }
 
 class Dialog extends Component<DialogProps, State> {
@@ -70,22 +69,19 @@ class Dialog extends Component<DialogProps, State> {
     dialogTitle: null,
     visible: false,
     containerStyle: null,
-    actionContainerStyle: null,
-    actionsBordered: true,
     animationDuration: DEFAULT_ANIMATION_DURATION,
     dialogStyle: null,
-    dialogAnimation: new FadeAnimation({ animationDuration: DEFAULT_ANIMATION_DURATION }),
     width: null,
     height: null,
     onTouchOutside: () => {},
-    onHardwareBackPress: () => true,
+    onHardwareBackPress: () => false,
     hasOverlay: true,
     overlayOpacity: 0.5,
     overlayPointerEvents: null,
     overlayBackgroundColor: '#000',
     onShow: () => {},
     onDismiss: () => {},
-    actions: null,
+    footer: null,
     useNativeDriver: true,
   }
 
@@ -93,20 +89,20 @@ class Dialog extends Component<DialogProps, State> {
     super(props);
 
     this.state = {
-      dialogAnimation: props.dialogAnimation,
+      dialogAnimation: props.dialogAnimation || new FadeAnimation({
+        animationDuration: props.animationDuration,
+      }),
       dialogState: DIALOG_CLOSED,
     };
   }
 
   componentDidMount() {
-    const { visible, onHardwareBackPress } = this.props;
-    if (visible) {
+    if (this.props.visible) {
       this.show();
     }
-    BackHandler.addEventListener(HARDWARE_BACK_PRESS_EVENT, onHardwareBackPress);
+    BackHandler.addEventListener(HARDWARE_BACK_PRESS_EVENT, this.onHardwareBackPress);
   }
-
-  componentDidUpdate(prevProps: DialogProps) {
+  UNSAFE_componentDidUpdate(prevProps: DialogProps) {
     if (this.props.visible !== prevProps.visible) {
       if (this.props.visible) {
         this.show();
@@ -116,10 +112,11 @@ class Dialog extends Component<DialogProps, State> {
     }
   }
 
-  componentWillUnmount() {
-    const { onHardwareBackPress } = this.props;
-    BackHandler.removeEventListener(HARDWARE_BACK_PRESS_EVENT, onHardwareBackPress);
+  UNSAFE_componentWillMount() {
+    BackHandler.removeEventListener(HARDWARE_BACK_PRESS_EVENT, this.onHardwareBackPress);
   }
+
+  onHardwareBackPress = (): boolean => this.props.onHardwareBackPress();
 
   get pointerEvents(): string {
     const { overlayPointerEvents } = this.props;
@@ -142,32 +139,20 @@ class Dialog extends Component<DialogProps, State> {
     return { width, height };
   }
 
-  setDialogState(toValue: number, callback?: Function = () => {}): void {
-    const { dialogAnimation } = this.state;
-    const { animationDuration } = this.props;
-    let dialogState = toValue ? DIALOG_OPENING : DIALOG_CLOSING;
-
-    dialogAnimation.toValue(toValue);
-    this.setState({ dialogState });
-
-    setTimeout(() => {
-      dialogState = dialogState === DIALOG_CLOSING ? DIALOG_CLOSED : DIALOG_OPENED;
-      this.setState({ dialogState }, callback);
-    }, animationDuration);
+  show(): void {
+    this.setState({ dialogState: DIALOG_OPENING }, () => {
+      this.state.dialogAnimation.in(() => {
+        this.setState({ dialogState: DIALOG_OPENED }, this.props.onShow);
+      });
+    });
   }
 
-  show = (): void => {
-    const { onShow } = this.props;
-    if (![DIALOG_OPENING, DIALOG_OPENED].includes(this.state.dialogState)) {
-      this.setDialogState(1, onShow);
-    }
-  }
-
-  dismiss = (): void => {
-    const { onDismiss } = this.props;
-    if (![DIALOG_CLOSING, DIALOG_CLOSED].includes(this.state.dialogState)) {
-      this.setDialogState(0, onDismiss);
-    }
+  dismiss(): void {
+    this.setState({ dialogState: DIALOG_CLOSING }, () => {
+      this.state.dialogAnimation.out(() => {
+        this.setState({ dialogState: DIALOG_CLOSED }, this.props.onDismiss);
+      });
+    });
   }
 
   render() {
@@ -184,20 +169,12 @@ class Dialog extends Component<DialogProps, State> {
       useNativeDriver,
       overlayBackgroundColor,
       containerStyle,
-      actionsBordered,
-      actionContainerStyle,
-      actions,
+      footer,
     } = this.props;
 
     const overlayVisible = hasOverlay && [DIALOG_OPENING, DIALOG_OPENED].includes(dialogState);
     const round = rounded ? styles.round : null;
     const hidden = dialogState === DIALOG_CLOSED && styles.hidden;
-
-    const buttons = actions ? (
-      <DialogActionList style={actionContainerStyle} bordered={actionsBordered}>
-        {actions}
-      </DialogActionList>
-    ) : null;
 
     return (
       <View style={[styles.container, hidden, containerStyle]}>
@@ -216,12 +193,12 @@ class Dialog extends Component<DialogProps, State> {
             round,
             this.dialogSize,
             dialogStyle,
-            dialogAnimation.animations,
+            dialogAnimation.getAnimations(),
           ]}
         >
           {dialogTitle}
           {children}
-          {buttons}
+          {footer}
         </Animated.View>
       </View>
     );
